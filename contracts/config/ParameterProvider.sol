@@ -10,5 +10,5 @@ contract ParameterProvider is Initializable, IParameterProvider {
     uint256 public constant FLASHLOAN_FEE_TOTAL = 35;
     uint256 public constant FLASHLOAN_FEE_PROTOCOL = 3000;
 
-    function initialize(address _addressesProvider) public initializer {}
+    function initialize(address) public initializer {}
 }
