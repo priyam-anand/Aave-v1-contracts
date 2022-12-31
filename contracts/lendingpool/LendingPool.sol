@@ -41,7 +41,7 @@ contract LendingPool is
     /// Modifiers
     /// -----------------------------------------------------------------------
 
-    modifier onlyActiveReserves(address _reserve) {
+    modifier onlyActiveReserve(address _reserve) {
         _requireActiveReserve(_reserve);
         _;
     }
@@ -53,6 +53,11 @@ contract LendingPool is
 
     modifier onlyAmountGreaterThanZero(uint256 _amount) {
         _requireAmountGreaterThanZero(_amount);
+        _;
+    }
+
+    modifier onlyOverlyingAToken(address _reserve) {
+        _requireOverlyingAToken(_reserve);
         _;
     }
 
@@ -79,8 +84,9 @@ contract LendingPool is
     function deposit(address _reserve, uint256 _amount)
         external
         payable
+        override
         nonReentrant
-        onlyActiveReserves(_reserve)
+        onlyActiveReserve(_reserve)
         onlyUnfreezedReserve(_reserve)
         onlyAmountGreaterThanZero(_amount)
     {
@@ -102,6 +108,41 @@ contract LendingPool is
         emit Deposit(_reserve, msg.sender, _amount, block.timestamp);
     }
 
+    function redeemUnderlying(
+        address _reserve,
+        address payable _user,
+        uint256 _amount,
+        uint256 _aTokenBalanceAfterRedeem
+    )
+        external
+        override
+        nonReentrant
+        onlyOverlyingAToken(_reserve)
+        onlyActiveReserve(_reserve)
+        onlyAmountGreaterThanZero(_amount)
+    {
+        uint256 currentAvailableLiquidity = core.getAvailableLiquidity(
+            _reserve
+        );
+
+        if (currentAvailableLiquidity < _amount) {
+            revert LendingPoolError(
+                LendingPoolErrorCodes.INSUFFICIENT_LIQUIDITY
+            );
+        }
+
+        core.updateStateOnRedeem(
+            _reserve,
+            _user,
+            _amount,
+            _aTokenBalanceAfterRedeem == 0
+        );
+
+        core.transferToUser(_reserve, _user, _amount);
+
+        emit RedeemUnderlying(_reserve, _user, _amount, block.timestamp);
+    }
+
     /// -----------------------------------------------------------------------
     /// Internal Actions
     /// -----------------------------------------------------------------------
@@ -121,6 +162,12 @@ contract LendingPool is
     function _requireAmountGreaterThanZero(uint256 _amount) internal pure {
         if (_amount <= 0) {
             revert LendingPoolError(LendingPoolErrorCodes.ZERO_AMOUNT);
+        }
+    }
+
+    function _requireOverlyingAToken(address _reserve) internal view {
+        if (msg.sender != core.getReserveATokenAddress(_reserve)) {
+            revert LendingPoolError(LendingPoolErrorCodes.ONLY_A_TOKEN);
         }
     }
 }

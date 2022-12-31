@@ -55,6 +55,20 @@ contract LendingPoolCore is ILendingPoolCore, Initializable {
         }
     }
 
+    function updateStateOnRedeem(
+        address _reserve,
+        address payable _user,
+        uint256 _amount,
+        bool _redeemAll
+    ) external onlyLendingPool {
+        CoreLibrary.updateCumulativeIndexes(reserves[_reserve]);
+        _updateReserveInterestRatesAndTimestamp(_reserve, 0, _amount);
+
+        if (_redeemAll) {
+            setUserUseReserveAsCollateral(_reserve, _user, false);
+        }
+    }
+
     function transferToReserve(
         address _reserve,
         address _user,
@@ -73,6 +87,23 @@ contract LendingPoolCore is ILendingPoolCore, Initializable {
                 address(this),
                 _amount
             );
+        }
+    }
+
+    function transferToUser(
+        address _reserve,
+        address payable _user,
+        uint256 _amount
+    ) external onlyLendingPool {
+        if (_reserve == EthLibrary.ethAddress()) {
+            (bool success, ) = _user.call{value: _amount}("");
+            if (!success) {
+                revert LendingPoolCoreError(
+                    LendingPoolCoreErrorCodes.FAILED_TO_SEND_ETH
+                );
+            }
+        } else {
+            SafeERC20.safeTransfer(IERC20(_reserve), _user, _amount);
         }
     }
 
