@@ -5,7 +5,9 @@ interface ILendingPool {
     enum LendingPoolErrorCodes {
         POOL_INACTIVE,
         POOL_FEEZED,
-        ZERO_AMOUNT
+        ZERO_AMOUNT,
+        ONLY_A_TOKEN,
+        INSUFFICIENT_LIQUIDITY
     }
 
     error LendingPoolError(LendingPoolErrorCodes code);
@@ -109,4 +111,13 @@ interface ILendingPool {
         bool _receiveAToken,
         uint256 _timestamp
     );
+
+    function deposit(address reserve, uint256 amount) external payable;
+
+    function redeemUnderlying(
+        address reserve,
+        address payable _user,
+        uint256 amount,
+        uint256 aTokenBalanceAfterRedeem
+    ) external;
 }
