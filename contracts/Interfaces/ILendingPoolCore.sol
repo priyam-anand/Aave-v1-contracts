@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.10;
 
+import "../utils/DataTypes.sol";
+
 interface ILendingPoolCore {
     // error
     enum LendingPoolCoreErrorCodes {
@@ -48,6 +50,14 @@ interface ILendingPoolCore {
         uint256 amount
     ) external;
 
+    function updateStateOnBorrow(
+        address _reserve,
+        address _user,
+        uint256 _amountBorrowed,
+        uint256 _borrowFee,
+        InterestRateMode _rateMode
+    ) external returns (uint256, uint256);
+
     // view
     function getAvailableLiquidity(address reserve)
         external
@@ -62,4 +72,15 @@ interface ILendingPoolCore {
         external
         view
         returns (address);
+
+    function isReserveBorrowingEnabled(address reserve)
+        external
+        view
+        returns (bool);
+
+    function isUserAllowedToBorrowAtStable(
+        address reserve,
+        address user,
+        uint256 amount
+    ) external view returns (bool);
 }

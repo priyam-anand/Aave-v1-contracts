@@ -74,3 +74,22 @@ struct ReserveData {
     // isFreezed = true means the reserve only allows repays and redeems, but not deposits, new borrowings or rate swap
     bool isFreezed;
 }
+
+struct BorrowLocalVars {
+    uint256 principalBorrowBalance;
+    uint256 currentLtv;
+    uint256 currentLiquidationThreshold;
+    uint256 borrowFee;
+    uint256 requestedBorrowAmountETH;
+    uint256 amountOfCollateralNeededETH;
+    uint256 userCollateralBalanceETH;
+    uint256 userBorrowBalanceETH;
+    uint256 userTotalFeesETH;
+    uint256 borrowBalanceIncrease;
+    uint256 currentReserveStableRate;
+    uint256 availableLiquidity;
+    uint256 reserveDecimals;
+    uint256 finalUserBorrowRate;
+    InterestRateMode rateMode;
+    bool healthFactorBelowThreshold;
+}

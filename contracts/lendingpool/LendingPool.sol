@@ -13,6 +13,7 @@ import "../Interfaces/IFeeProvider.sol";
 
 // libraray imports
 import "../lib/Math.sol";
+import "../utils/DataTypes.sol";
 
 // lending pool helpers
 import "../Interfaces/ILendingPoolDataProvider.sol";
@@ -121,15 +122,7 @@ contract LendingPool is
         onlyActiveReserve(_reserve)
         onlyAmountGreaterThanZero(_amount)
     {
-        uint256 currentAvailableLiquidity = core.getAvailableLiquidity(
-            _reserve
-        );
-
-        if (currentAvailableLiquidity < _amount) {
-            revert LendingPoolError(
-                LendingPoolErrorCodes.INSUFFICIENT_LIQUIDITY
-            );
-        }
+        _checkAvailableLiquidity(_reserve, _amount);
 
         core.updateStateOnRedeem(
             _reserve,
@@ -141,6 +134,121 @@ contract LendingPool is
         core.transferToUser(_reserve, _user, _amount);
 
         emit RedeemUnderlying(_reserve, _user, _amount, block.timestamp);
+    }
+
+    function borrow(
+        address _reserve,
+        uint256 _amount,
+        uint256 _interestRateMode
+    )
+        external
+        override
+        nonReentrant
+        onlyActiveReserve(_reserve)
+        onlyUnfreezedReserve(_reserve)
+        onlyAmountGreaterThanZero(_amount)
+    {
+        _checkReserveBorrowing(_reserve);
+
+        if (!(_interestRateMode == 0 || _interestRateMode == 1)) {
+            revert LendingPoolError(
+                LendingPoolErrorCodes.INVALID_INTEREST_RATE
+            );
+        }
+        BorrowLocalVars memory vars;
+
+        vars.availableLiquidity = _checkAvailableLiquidity(_reserve, _amount);
+        vars.rateMode = InterestRateMode(_interestRateMode);
+
+        (
+            ,
+            vars.userCollateralBalanceETH,
+            vars.userBorrowBalanceETH,
+            vars.userTotalFeesETH,
+            vars.currentLtv,
+            vars.currentLiquidationThreshold,
+            ,
+            vars.healthFactorBelowThreshold
+        ) = dataProvider.calculateUserGlobalData(msg.sender);
+
+        if (vars.userCollateralBalanceETH <= 0) {
+            revert LendingPoolError(
+                LendingPoolErrorCodes.COLLATERAL_BALANCE_ZERO
+            );
+        }
+
+        if (vars.healthFactorBelowThreshold) {
+            revert LendingPoolError(
+                LendingPoolErrorCodes.INVALID_HEALTH_FACTOR
+            );
+        }
+
+        vars.borrowFee = feeProvider.calculateLoanOriginationFee(
+            msg.sender,
+            _amount
+        );
+
+        if (vars.borrowFee <= 0) {
+            revert LendingPoolError(LendingPoolErrorCodes.INVALID_AMOUNT);
+        }
+
+        vars.amountOfCollateralNeededETH = dataProvider
+            .calculateCollateralNeededInETH(
+                _reserve,
+                _amount,
+                vars.borrowFee,
+                vars.userBorrowBalanceETH,
+                vars.userTotalFeesETH,
+                vars.currentLtv
+            );
+
+        if (vars.amountOfCollateralNeededETH > vars.userCollateralBalanceETH) {
+            revert LendingPoolError(
+                LendingPoolErrorCodes.INVALID_COLLATERAL_AMOUNT
+            );
+        }
+
+        if (vars.rateMode == InterestRateMode.STABLE) {
+            if (
+                !core.isUserAllowedToBorrowAtStable(
+                    _reserve,
+                    msg.sender,
+                    _amount
+                )
+            ) {
+                revert LendingPoolError(
+                    LendingPoolErrorCodes.STABLE_RATE_NOT_ALLOWED
+                );
+            }
+            uint256 maxLoanPercent = parameterProvider
+                .MAX_STABLE_RATE_BORROW_SIZE_PERCENT();
+            uint256 maxLoanSizeStable = (vars.availableLiquidity *
+                maxLoanPercent) / 100;
+            if (_amount > maxLoanSizeStable) {
+                revert LendingPoolError(LendingPoolErrorCodes.INVALID_AMOUNT);
+            }
+        }
+
+        (vars.finalUserBorrowRate, vars.borrowBalanceIncrease) = core
+            .updateStateOnBorrow(
+                _reserve,
+                msg.sender,
+                _amount,
+                vars.borrowFee,
+                vars.rateMode
+            );
+
+        core.transferToUser(_reserve, payable(msg.sender), _amount);
+        emit Borrow(
+            _reserve,
+            msg.sender,
+            _amount,
+            _interestRateMode,
+            vars.finalUserBorrowRate,
+            vars.borrowFee,
+            vars.borrowBalanceIncrease,
+            block.timestamp
+        );
     }
 
     /// -----------------------------------------------------------------------
@@ -168,6 +276,27 @@ contract LendingPool is
     function _requireOverlyingAToken(address _reserve) internal view {
         if (msg.sender != core.getReserveATokenAddress(_reserve)) {
             revert LendingPoolError(LendingPoolErrorCodes.ONLY_A_TOKEN);
+        }
+    }
+
+    function _checkAvailableLiquidity(address _reserve, uint256 _amount)
+        internal
+        view
+        returns (uint256 _availableLiquidity)
+    {
+        _availableLiquidity = core.getAvailableLiquidity(_reserve);
+        if (_availableLiquidity < _amount) {
+            revert LendingPoolError(
+                LendingPoolErrorCodes.INSUFFICIENT_LIQUIDITY
+            );
+        }
+    }
+
+    function _checkReserveBorrowing(address _reserve) internal view {
+        if (!core.isReserveBorrowingEnabled(_reserve)) {
+            revert LendingPoolError(
+                LendingPoolErrorCodes.BORROWING_NOT_ENABLED
+            );
         }
     }
 }
