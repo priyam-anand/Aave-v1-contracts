@@ -59,6 +59,28 @@ interface ILendingPoolCore {
     ) external returns (uint256, uint256);
 
     // view
+    function getUserBasicReserveData(address _reserve, address _user)
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256,
+            bool
+        );
+
+    function getReserveConfiguration(address _reserve)
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256,
+            bool
+        );
+
+    function getReserves() external view returns (address[] memory);
+
     function getAvailableLiquidity(address reserve)
         external
         view
@@ -72,6 +94,11 @@ interface ILendingPoolCore {
         external
         view
         returns (address);
+
+    function getReserveDecimals(address reserve)
+        external
+        view
+        returns (uint256);
 
     function isReserveBorrowingEnabled(address reserve)
         external

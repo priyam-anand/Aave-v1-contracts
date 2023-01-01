@@ -154,6 +154,71 @@ contract LendingPoolCore is ILendingPoolCore, Initializable {
     }
 
     // view
+    function getUserBasicReserveData(address _reserve, address _user)
+        external
+        view
+        override
+        returns (
+            uint256,
+            uint256,
+            uint256,
+            bool
+        )
+    {
+        ReserveData storage reserve = reserves[_reserve];
+        UserReserveData storage user = userReserveData[_user][_reserve];
+
+        uint256 underlyingBalance = _getUserUnderlyingAssetBalance(
+            _reserve,
+            _user
+        );
+
+        if (user.principalBorrowBalance == 0) {
+            return (underlyingBalance, 0, 0, user.useAsCollateral);
+        }
+
+        return (
+            underlyingBalance,
+            CoreLibrary.getCompoundedBorrowBalance(user, reserve),
+            user.originationFee,
+            user.useAsCollateral
+        );
+    }
+
+    function getReserveConfiguration(address _reserve)
+        external
+        view
+        override
+        returns (
+            uint256,
+            uint256,
+            uint256,
+            bool
+        )
+    {
+        uint256 decimals;
+        uint256 baseLTVasCollateral;
+        uint256 liquidationThreshold;
+        bool usageAsCollateralEnabled;
+
+        ReserveData storage reserve = reserves[_reserve];
+        decimals = reserve.decimals;
+        baseLTVasCollateral = reserve.baseLTVasCollateral;
+        liquidationThreshold = reserve.liquidationThreshold;
+        usageAsCollateralEnabled = reserve.usageAsCollateralEnabled;
+
+        return (
+            decimals,
+            baseLTVasCollateral,
+            liquidationThreshold,
+            usageAsCollateralEnabled
+        );
+    }
+
+    function getReserves() public view override returns (address[] memory) {
+        return reservesList;
+    }
+
     function getAvailableLiquidity(address _reserve)
         public
         view
@@ -195,6 +260,15 @@ contract LendingPoolCore is ILendingPoolCore, Initializable {
     {
         ReserveData storage reserve = reserves[_reserve];
         return reserve.aTokenAddress;
+    }
+
+    function getReserveDecimals(address _reserve)
+        external
+        view
+        override
+        returns (uint256)
+    {
+        return reserves[_reserve].decimals;
     }
 
     function isReserveBorrowingEnabled(address _reserve)

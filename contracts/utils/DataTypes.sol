@@ -93,3 +93,17 @@ struct BorrowLocalVars {
     InterestRateMode rateMode;
     bool healthFactorBelowThreshold;
 }
+
+struct UserGlobalDataLocalVars {
+    uint256 reserveUnitPrice;
+    uint256 tokenUnit;
+    uint256 compoundedLiquidityBalance;
+    uint256 compoundedBorrowBalance;
+    uint256 reserveDecimals;
+    uint256 baseLtv;
+    uint256 liquidationThreshold;
+    uint256 originationFee;
+    bool usageAsCollateralEnabled;
+    bool userUsesReserveAsCollateral;
+    address currentReserve;
+}
