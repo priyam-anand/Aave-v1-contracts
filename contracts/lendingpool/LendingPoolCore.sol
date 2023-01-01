@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../Interfaces/ILendingPoolCore.sol";
 import "../Interfaces/IAddressProvider.sol";
 import "../Interfaces/IReserveInterestRateStrategy.sol";
+import "../Interfaces/IAToken.sol";
 
 import "../utils/DataTypes.sol";
 
@@ -67,6 +68,42 @@ contract LendingPoolCore is ILendingPoolCore, Initializable {
         if (_redeemAll) {
             setUserUseReserveAsCollateral(_reserve, _user, false);
         }
+    }
+
+    function updateStateOnBorrow(
+        address _reserve,
+        address _user,
+        uint256 _amountBorrowed,
+        uint256 _borrowFee,
+        InterestRateMode _rateMode
+    ) external onlyLendingPool returns (uint256, uint256) {
+        (
+            uint256 principalBorrowBalance,
+            ,
+            uint256 balanceIncrease
+        ) = getUserBorrowBalances(_reserve, _user);
+
+        _updateReserveTotalBorrowsByRateMode(
+            _reserve,
+            _user,
+            principalBorrowBalance,
+            balanceIncrease,
+            _amountBorrowed,
+            _rateMode
+        );
+
+        _updateUserStateOnBorrow(
+            _reserve,
+            _user,
+            _amountBorrowed,
+            balanceIncrease,
+            _borrowFee,
+            _rateMode
+        );
+
+        _updateReserveInterestRatesAndTimestamp(_reserve, 0, _amountBorrowed);
+
+        return (_getUserCurrentBorrowRate(_reserve, _user), balanceIncrease);
     }
 
     function transferToReserve(
@@ -160,9 +197,41 @@ contract LendingPoolCore is ILendingPoolCore, Initializable {
         return reserve.aTokenAddress;
     }
 
+    function isReserveBorrowingEnabled(address _reserve)
+        external
+        view
+        returns (bool)
+    {
+        ReserveData storage reserve = reserves[_reserve];
+        return reserve.borrowingEnabled;
+    }
+
+    function isUserAllowedToBorrowAtStable(
+        address _reserve,
+        address _user,
+        uint256 _amount
+    ) external view override returns (bool) {
+        ReserveData storage reserve = reserves[_reserve];
+        UserReserveData storage userData = userReserveData[_user][_reserve];
+        if (!reserve.isStableBorrowRateEnabled) return false;
+        return
+            !userData.useAsCollateral ||
+            !reserve.usageAsCollateralEnabled ||
+            _amount > _getUserUnderlyingAssetBalance(_reserve, _user);
+    }
+
     // internal
     function _refreshConfig() internal {
         lendingPoolAddress = addressesProvider.getLendingPool();
+    }
+
+    function _getUserUnderlyingAssetBalance(address _reserve, address _user)
+        internal
+        view
+        returns (uint256)
+    {
+        IAToken aToken = IAToken(reserves[_reserve].aTokenAddress);
+        return aToken.balanceOf(_user);
     }
 
     function _updateReserveInterestRatesAndTimestamp(
@@ -204,5 +273,147 @@ contract LendingPoolCore is ILendingPoolCore, Initializable {
             reserve.lastLiquidityCumulativeIndex,
             reserve.lastVariableBorrowCumulativeIndex
         );
+    }
+
+    function getUserBorrowBalances(address _reserve, address _user)
+        public
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256
+        )
+    {
+        UserReserveData storage user = userReserveData[_user][_reserve];
+        if (user.principalBorrowBalance == 0) {
+            return (0, 0, 0);
+        }
+
+        uint256 principal = user.principalBorrowBalance;
+        uint256 compoundedBalance = CoreLibrary.getCompoundedBorrowBalance(
+            user,
+            reserves[_reserve]
+        );
+        return (principal, compoundedBalance, compoundedBalance - principal);
+    }
+
+    function _updateReserveTotalBorrowsByRateMode(
+        address _reserve,
+        address _user,
+        uint256 _principalBalance,
+        uint256 _balanceIncrease,
+        uint256 _amountBorrowed,
+        InterestRateMode _newBorrowRateMode
+    ) internal {
+        InterestRateMode previousRateMode = getUserCurrentBorrowRateMode(
+            _reserve,
+            _user
+        );
+        ReserveData storage reserve = reserves[_reserve];
+
+        if (previousRateMode == InterestRateMode.STABLE) {
+            UserReserveData storage user = userReserveData[_user][_reserve];
+            CoreLibrary.decreaseTotalBorrowsStableAndUpdateAverageRate(
+                reserve,
+                _principalBalance,
+                user.stableBorrowRate
+            );
+        } else if (previousRateMode == InterestRateMode.VARIABLE) {
+            CoreLibrary.decreaseTotalBorrowsVariable(
+                reserve,
+                _principalBalance
+            );
+        }
+
+        uint256 newPrincipalAmount = _principalBalance +
+            _balanceIncrease +
+            _amountBorrowed;
+        if (_newBorrowRateMode == InterestRateMode.STABLE) {
+            CoreLibrary.increaseTotalBorrowsStableAndUpdateAverageRate(
+                reserve,
+                newPrincipalAmount,
+                reserve.currentStableBorrowRate
+            );
+        } else if (_newBorrowRateMode == InterestRateMode.VARIABLE) {
+            CoreLibrary.increaseTotalBorrowsVariable(
+                reserve,
+                newPrincipalAmount
+            );
+        } else {
+            revert("Invalid new borrow rate mode");
+        }
+    }
+
+    function getUserCurrentBorrowRateMode(address _reserve, address _user)
+        internal
+        view
+        returns (InterestRateMode)
+    {
+        UserReserveData storage user = userReserveData[_user][_reserve];
+
+        if (user.principalBorrowBalance == 0) {
+            return InterestRateMode.NONE;
+        }
+
+        return
+            user.stableBorrowRate > 0
+                ? InterestRateMode.STABLE
+                : InterestRateMode.VARIABLE;
+    }
+
+    function _updateUserStateOnBorrow(
+        address _reserve,
+        address _user,
+        uint256 _amountBorrowed,
+        uint256 _balanceIncrease,
+        uint256 _fee,
+        InterestRateMode _rateMode
+    ) internal {
+        ReserveData storage reserve = reserves[_reserve];
+        UserReserveData storage user = userReserveData[_user][_reserve];
+
+        if (_rateMode == InterestRateMode.STABLE) {
+            //stable
+            //reset the user variable index, and update the stable rate
+            user.stableBorrowRate = reserve.currentStableBorrowRate;
+            user.lastVariableBorrowCumulativeIndex = 0;
+        } else if (_rateMode == InterestRateMode.VARIABLE) {
+            //variable
+            //reset the user stable rate, and store the new borrow index
+            user.stableBorrowRate = 0;
+            user.lastVariableBorrowCumulativeIndex = reserve
+                .lastVariableBorrowCumulativeIndex;
+        } else {
+            revert("Invalid borrow rate mode");
+        }
+        //increase the principal borrows and the origination fee
+        user.principalBorrowBalance =
+            user.principalBorrowBalance +
+            _amountBorrowed +
+            _balanceIncrease;
+        user.originationFee = user.originationFee + _fee;
+
+        //solium-disable-next-line
+        user.lastUpdateTimestamp = uint40(block.timestamp);
+    }
+
+    function _getUserCurrentBorrowRate(address _reserve, address _user)
+        internal
+        view
+        returns (uint256)
+    {
+        InterestRateMode rateMode = getUserCurrentBorrowRateMode(
+            _reserve,
+            _user
+        );
+
+        if (rateMode == InterestRateMode.NONE) {
+            return 0;
+        }
+
+        return
+            rateMode == InterestRateMode.STABLE
+                ? userReserveData[_user][_reserve].stableBorrowRate
+                : reserves[_reserve].currentVariableBorrowRate;
     }
 }

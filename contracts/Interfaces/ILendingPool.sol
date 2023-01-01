@@ -7,7 +7,14 @@ interface ILendingPool {
         POOL_FEEZED,
         ZERO_AMOUNT,
         ONLY_A_TOKEN,
-        INSUFFICIENT_LIQUIDITY
+        INSUFFICIENT_LIQUIDITY,
+        BORROWING_NOT_ENABLED,
+        INVALID_INTEREST_RATE,
+        COLLATERAL_BALANCE_ZERO,
+        INVALID_HEALTH_FACTOR,
+        INVALID_AMOUNT,
+        INVALID_COLLATERAL_AMOUNT,
+        STABLE_RATE_NOT_ALLOWED
     }
 
     error LendingPoolError(LendingPoolErrorCodes code);
@@ -34,7 +41,6 @@ interface ILendingPool {
         uint256 _borrowRate,
         uint256 _originationFee,
         uint256 _borrowBalanceIncrease,
-        uint16 indexed _referral,
         uint256 _timestamp
     );
 
@@ -119,5 +125,11 @@ interface ILendingPool {
         address payable _user,
         uint256 amount,
         uint256 aTokenBalanceAfterRedeem
+    ) external;
+
+    function borrow(
+        address reserve,
+        uint256 amount,
+        uint256 interestRatemode
     ) external;
 }
